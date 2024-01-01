@@ -140,6 +140,9 @@ class horus:
         self.lgd = 1
         self.int_floor = None
         self.int_limit = None
+        self.Application_Score = None
+        self.Behavioural_Data = [None, None, None, None, None, None]
+        self.Behavioural_Data_without_changes = [None, None, None, None, None, None]
         self.ead = self.get_oth_params('EAD')
         self.lgd = self.get_oth_params('LGD')
         self.int_floor = self.get_oth_params('int_floor')
@@ -530,6 +533,162 @@ class horus:
         return results
 
 
+    #getting behavioural_data
+    def get_behavioural_data(self):
+        with snowflake.connector.connect(
+                user=snowflake_cfg['username'],
+                password=snowflake_cfg['password'],
+                account=snowflake_cfg['host']
+        ) as conn:
+            conn.cursor().execute('USE WAREHOUSE DATA_SCIENCE');
+            
+            # Payment Behaviour - Percentage Full payments
+            percentage_full_payments_df = pd.read_sql("""SELECT CMD_CTR_BORROWER_ID, 
+            SUM(CASE WHEN INSTALLMENT_PAYMENT_STATUS_CODE='PAID' THEN 1 ELSE 0 END)*100/COUNT(*) AS PERCENTAGE_FULL_PAYMENTS_LAST_YEAR
+            FROM ADM.TRANSACTION.INSTALLMENT_DENORM_T
+            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s
+                AND LOAN_STAGE_ID = 5
+                AND LOAN_PLATFORM_CODE IN ('ID','ZI')
+                AND CMD_CTR_ADJUSTED_PRODUCT_ID IN (13,38,32,35,16,18,34,17,-102,-104,60)
+                AND INSTALLMENT_PAYMENT_DEADLINE_LCL_TS<GETDATE()
+                AND INSTALLMENT_PAYMENT_DEADLINE_LCL_TS>DATEADD(YEAR, -1, GETDATE())
+            GROUP BY CMD_CTR_BORROWER_ID;""", params = {'borrower_id':self.borrowerID}, con=conn) 
+            
+            # DPD Behaviour - Percentage DPD0
+            percentage_dpd_df = pd.read_sql("""SELECT CMD_CTR_BORROWER_ID, 
+            SUM(CASE WHEN LOAN_MAX_DPD_LCL_DAYS>0 THEN 1 ELSE 0 END)*100/COUNT(*) AS PERCENTAGE_DPD
+            FROM ADM.TRANSACTION.LOAN_DENORM_T
+            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s
+                AND LOAN_STAGE_ID = 5
+                AND LOAN_PLATFORM_CODE IN ('ID','ZI')
+                AND CMD_CTR_ADJUSTED_PRODUCT_ID IN (13,38,32,35,16,18,34,17,-102,-104,60)
+            GROUP BY CMD_CTR_BORROWER_ID;""", params = {'borrower_id':self.borrowerID}, con=conn) 
+            
+            # Historical Loan and Facility Information - tenure and number of applied loans
+            tenure_df = pd.read_sql("""SELECT CMD_CTR_BORROWER_ID,
+            DATEDIFF(DAY, MIN(LOAN_CREATED_AT_LCL_TS), GETDATE()) AS TENURE
+            FROM ADM.TRANSACTION.LOAN_DENORM_T
+            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s
+                AND LOAN_STAGE_ID = 5
+                AND LOAN_PLATFORM_CODE IN ('ID','ZI')
+                AND CMD_CTR_ADJUSTED_PRODUCT_ID IN (13,38,32,35,16,18,34,17,-102,-104,60)
+            GROUP BY CMD_CTR_BORROWER_ID;""", params = {'borrower_id':self.borrowerID}, con=conn) 
+            
+            number_of_applied_loans_df = pd.read_sql("""SELECT CMD_CTR_BORROWER_ID,
+            count(*) AS NUMBER_OF_APPLIED_LOANS_LAST_YEAR
+            FROM ADM.TRANSACTION.LOAN_DENORM_T
+            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s
+                AND LOAN_PLATFORM_CODE IN ('ID','ZI')
+                AND LOAN_CREATED_AT_LCL_TS<GETDATE()
+                AND LOAN_CREATED_AT_LCL_TS>DATEADD(YEAR, -1, GETDATE())
+                AND CMD_CTR_ADJUSTED_PRODUCT_ID IN (13,38,32,35,16,18,34,17,-102,-104,60)
+            GROUP BY CMD_CTR_BORROWER_ID;""", params = {'borrower_id':self.borrowerID}, con=conn) 
+            
+            # Application Score - application model score from one year ago
+            application_pd_one_year_before_df = pd.read_sql("""SELECT CMD_CTR_BORROWER_ID, 
+            LOAN_CREATED_DATE, APPLICATION_PD
+            FROM CBM.DATA_SCIENCE_MODEL_RESULTS.ID_LINE_HORUS_PRIME
+            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s;""", params = {'borrower_id':self.borrowerID}, con=conn)
+        
+        percentage_full_payments_df.columns = [str.lower(col) for col in percentage_full_payments_df.columns]
+        percentage_dpd_df.columns = [str.lower(col) for col in percentage_dpd_df.columns]
+        tenure_df.columns = [str.lower(col) for col in tenure_df.columns]
+        number_of_applied_loans_df.columns = [str.lower(col) for col in number_of_applied_loans_df.columns]
+        application_pd_one_year_before_df.columns = [str.lower(col) for col in application_pd_one_year_before_df.columns]
+        
+        # Dealing with None values
+        if percentage_full_payments_df.shape[0]==0:
+            percentage_full_payments = None
+        else:
+            percentage_full_payments = percentage_full_payments_df['percentage_full_payments_last_year'].mean()
+        if percentage_dpd_df.shape[0]==0:
+            percentage_dpd = None
+        else:
+            percentage_dpd = percentage_dpd_df['percentage_dpd'].mean()
+        if tenure_df.shape[0]==0:
+            tenure = None
+        else:
+            tenure = tenure_df['tenure'].mean()
+        if number_of_applied_loans_df.shape[0]==0:
+            number_of_applied_loans_last_year = None
+        else:
+            number_of_applied_loans_last_year = number_of_applied_loans_df['number_of_applied_loans_last_year'].mean()
+        
+        # getting application PD from one year ago
+        if application_pd_one_year_before_df.shape[0]==0:
+            application_score_pd_one_year_before = None
+        else:
+            application_pd_one_year_before_df['loan_created_date'] = pd.to_datetime(application_pd_one_year_before_df['loan_created_date'], utc=True)
+            one_year_from_today = pd.to_datetime('today', utc=True) - pd.DateOffset(years=1)
+            result = application_pd_one_year_before_df.loc[application_pd_one_year_before_df['loan_created_date'].sub(one_year_from_today).abs().idxmin()]
+            application_score_pd_one_year_before = result['application_pd'].mean()
+        
+        l = []
+        l.append([percentage_full_payments,percentage_dpd,tenure, number_of_applied_loans_last_year, application_score_pd_one_year_before])
+        behaviour_data = pd.DataFrame(l,  columns = ['percentage_full_payments','percentage_dpd','tenure','number_of_applied_loans_last_year','application_score_pd_one_year_before'])
+        
+        #final behavioural data
+        self.Behavioural_Data = behaviour_data
+        self.Behavioural_Data_without_changes = behaviour_data
+        return behaviour_data
+
+
+    def behavioural_prophesize(self):
+        #b_data['application_score'] = output['FinalPD'].mean()
+        b_data = self.Behavioural_Data
+        app_score = self.Application_Score
+        b_data['application_score'] = app_score
+        # if pd from one year ago is not available, then change in pd is 0
+        b_data['application_score_pd_one_year_before'] = b_data['application_score_pd_one_year_before'].fillna(app_score)
+        # calculating change in PD
+        b_data['change_in_pd'] = (b_data['application_score'] - b_data['application_score_pd_one_year_before'])*100/(b_data['application_score_pd_one_year_before']+0.0001)
+        
+        def transform_behavioural(df_behavioural):
+            df_behavioural = df_behavioural[['percentage_full_payments', 'percentage_dpd', 'tenure',
+               'number_of_applied_loans_last_year', 'application_score',
+               'change_in_pd']]
+            df_behavioural = df_behavioural.replace(np.inf, 333333333333)
+            df_behavioural = df_behavioural.replace(-np.inf, -444444444444)
+            df_behavioural = df_behavioural.replace('#N/A', np.nan)
+            df_behavioural = df_behavioural.replace('None', np.nan)
+            df_behavioural = df_behavioural.fillna(999999999999)
+            return df_behavioural
+        
+        b_data = transform_behavioural(b_data)
+        
+        # WOE Binning
+        woeMaps = get_gsheet_values('1FyTx8Uw2OxBajGmRKGxB-1O21y5nuvzzTIClmJhQx6g', 'WOE Table - Behavioural', "A1:E100")
+        woeMaps = woeMaps.reset_index(drop=True)
+        woeMaps['BIN_START'] = woeMaps['BIN_START'].astype(float)
+        woeMaps['BIN_END'] = woeMaps['BIN_END'].astype(float)
+        cols = ['%_of_full_payments_last_year', '%_dpd',
+           'date_difference_from_earliest_loan',
+           'number_of_applied_loans_lastyear', 'final_pred_v1', 'change_in_pd']
+        replacement_dict = {'percentage_full_payments':'%_of_full_payments_last_year', 'application_score':'final_pred_v1', 'percentage_dpd':'%_dpd','tenure':'date_difference_from_earliest_loan','number_of_applied_loans_last_year':'number_of_applied_loans_lastyear'}
+        b_data.columns = [replacement_dict.get(col, col) for col in b_data.columns]
+        def apply_binning(value, binning_map, column):
+            binning_map = binning_map[binning_map['VARIABLE']==column]
+            for index, row in binning_map.iterrows():
+                if row['BIN_START'] <= value < row['BIN_END']:
+                    return row['WOE']
+            return None
+        for column in cols:
+            b_data[column+'_woe'] = b_data[column].apply(lambda x: apply_binning(x, woeMaps, column))
+        beh_input_data = b_data[[
+           'date_difference_from_earliest_loan_woe','%_dpd_woe','final_pred_v1_woe','change_in_pd_woe','%_of_full_payments_last_year_woe',
+           'number_of_applied_loans_lastyear_woe']]
+
+        # need to change this part before deployment
+        # change needed
+        #feature_list_behavioural = list(beh_input_data.values[0])
+        #feature_list_behavioural = (np.array(feature_list_behavioural).astype(np.float64))
+        with open('id_line_behavioural_model_file.joblib', 'rb') as f:
+            beh_predictor = joblib.load(f)
+            beh_def_prob = beh_predictor.predict_proba(beh_input_data)[0][1]
+        logger.info(f"Behavioural Features: {self.Behavioural_Data}")
+        logger.info(f"Probability Behavioural: {beh_def_prob}")
+        return b_data, beh_def_prob
+
 def get_gsheet_values(sheet_id, sheet_name, sheet_range=''):
     scope = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
     credentials = service_account.Credentials.from_service_account_file(
@@ -561,9 +720,8 @@ def calculate(facility_code):
     z.applicationData = z.invoke()
 
     output = z.prophesize()
-    output['application_data'] = z.applicationData.to_json()
-
-    logger.info(f"Application Data: {json.loads(output['application_data'])}")
+    app_score = output['FinalPD']
+    b_data = z.get_behavioural_data()
     result = {}
     result['time_stamp'] = ts
     #result['loan_id'] = z.loanID
@@ -571,8 +729,33 @@ def calculate(facility_code):
     result['borrower_id'] = z.borrowerID
     result['BS_PD'] = output['BS_PD']
     result['Pefindo_PD'] = output['Pefindo_PD']
-    result['FinalPD'] = output['FinalPD']
+    result['ApplicationPD'] = output['FinalPD']
     result['historicalDPD'] = z.historicalDPD
+    result['percentage_dpd_total'] = list(b_data['percentage_dpd'])[0]
+    result['customer_tenure_b'] = list(b_data['tenure'])[0]
+    result['previous_application_pd'] = list(b_data['application_score_pd_one_year_before'])[0]
+    result['percentage_full_payment_last_year'] = list(b_data['percentage_full_payments'])[0]
+    result['number_of_applied_loans_last_year'] = list(b_data['number_of_applied_loans_last_year'])[0]  
+    if list(b_data['application_score_pd_one_year_before'])[0]==None:
+        result['change_in_pd'] =0
+    else:
+        result['change_in_pd'] = (result['ApplicationPD']-list(b_data['application_score_pd_one_year_before'])[0])*100/(list(b_data['application_score_pd_one_year_before'])[0]+0.0001)
+    if b_data['tenure'][0]==None:
+        b_data, pred_behavioural, a_b_indicator = b_data, None, "A"
+        final_pd_ab = app_score
+    elif b_data['tenure'][0]>=90:
+        b_data, pred_behavioural = z.behavioural_prophesize()
+        final_pd_ab = pred_behavioural
+        a_b_indicator = 'B'
+    else:
+        b_data, pred_behavioural, a_b_indicator = b_data, None, "A"
+        final_pd_ab = app_score
+
+    output['application_data'] = z.applicationData.to_json()
+    result['BehaviouralPD'] = pred_behavioural
+    result['ABIndicator'] = a_b_indicator
+    result['FinalPD'] = final_pd_ab
+    logger.info(f"Application Data: {json.loads(output['application_data'])}")
     logger.info(f"Final Results: {result}")
     return result
 
