@@ -86,6 +86,7 @@ class horus:
         # self.industryRiskMap = industryRiskMap
         # self.riskQuantumTenorMap = riskQuantumTenorMap
         self.othParams = othParams
+        self.all_bs_data = pd.DataFrame()
         # self.avg_non_trade_trans = self.get_credit_v2_nonTradeIncome()
         # NOTE TO DEV: Pull from GS --done
         try:
@@ -131,6 +132,7 @@ class horus:
         # self.riskQuantum = None
         # self.riskTenor = None
         self.applicationData = self.invoke()
+        self.loan_date = self.get_loan_date()
         self.quantumCap = None
         self.tenorCap = None
         self.modelInput = None
@@ -182,6 +184,7 @@ class horus:
         product = df.loc[:, "PRODUCT":"PRODUCT"].values[0][0]
         df_bank = df_bank.reset_index(drop=True)
         df_pefindo = df_pefindo.reset_index(drop=True)
+        self.all_bs_data = df_bank
         # print("Fetched model inputs before transformations:\n")
         # print(df_bank.to_string())
         # print("\n")
@@ -361,7 +364,7 @@ class horus:
                 result = float(result.replace(',', ''))
             return result
 
-    def get_borrower_id(self):
+    def get_loan_date(self):
 
         if str(self.platform_code).upper() == "ZI" or str(self.platform_code).upper() == "ZU":
             DBLoan = productionDBLoan
@@ -369,25 +372,25 @@ class horus:
             DBLoan = productionDBLoan_id
         try:
             if str(self.product_name).lower() != "tl enterprise":
-                borrower_id = DBLoan.query_postgres('''
-                            SELECT borrower_id
+                loan_date = DBLoan.query_postgres('''
+                            SELECT max(created_at) as created_date
                             FROM loans
                             WHERE facility_code=%(facility_code)s;
-                        ''', params={'facility_code': self.facility_code})['borrower_id'].values[0]
+                        ''', params={'facility_code': self.facility_code})['created_date'].values[0]
             else:
-                borrower_id = DBLoan.query_postgres('''
-                                            SELECT borrower_id
+                loan_date = DBLoan.query_postgres('''
+                                            SELECT max(created_at) as created_date
                                             FROM loans
                                             WHERE loan_code=%(facility_code)s;
-                                        ''', params={'facility_code': self.facility_code})['borrower_id'].values[0]
+                                        ''', params={'facility_code': self.facility_code})['created_date'].values[0]
 
 
-            print("Borrower ID", borrower_id)
+            #print("Borrower ID", borrower_id)
         except:
-            print("Borrower ID from the Gsheet")
-            borrower_id = self.borrowerID_gs
+            #print("Borrower ID from the Gsheet")
+            loan_date = pd.to_datetime("today", utc=True)
 
-        return borrower_id
+        return loan_date
 
     # def get_loan_id(self):
     #     try:
@@ -689,6 +692,44 @@ class horus:
         logger.info(f"Probability Behavioural: {beh_def_prob}")
         return b_data, beh_def_prob
 
+def write_to_snowflake(df):
+    """
+        Writes a pandas DataFrame to a Snowflake database.
+        Args:
+            df (pandas.DataFrame): The DataFrame to be written to the Snowflake table.
+        Raises:
+            snowflake.connector.errors.Error: If an error occurs while executing the SQL statements.
+        Returns:
+            None
+        """
+    try:
+        with snowflake.connector.connect(
+                user=snowflake_cfg['username'],
+                password=snowflake_cfg['password'],
+                account=snowflake_cfg['host'],
+                database='CBM',
+                schema='DATA_SCIENCE_MODEL_RESULTS'
+        ) as conn:
+
+            cur = conn.cursor().execute('USE WAREHOUSE DATA_SCIENCE');
+            # Each tuple represents a row in the DataFrame
+            values_to_log = [tuple(x) for x in df.values]
+            # print(values_to_log)
+            table_name = 'ID_LINE_HORUS_PRIME'
+            columns = ','.join(df.columns)
+            query = f"INSERT INTO {table_name} ({columns}) VALUES ({','.join(['%s'] * len(df.columns))})"
+            # Can handle insertion od multiple rows
+            cur.executemany(query, values_to_log)
+            conn.commit()
+
+    except Exception as e:
+        print(f"Error: {e}")
+        conn.rollback()
+
+    finally:
+        cur.close()
+        conn.close()
+
 def get_gsheet_values(sheet_id, sheet_name, sheet_range=''):
     scope = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
     credentials = service_account.Credentials.from_service_account_file(
@@ -757,8 +798,64 @@ def calculate(facility_code):
     result['FinalPD'] = final_pd_ab
     logger.info(f"Application Data: {json.loads(output['application_data'])}")
     logger.info(f"Final Results: {result}")
-    return result
 
+    # updating CBM Table
+    df_dwh = pd.DataFrame(columns=['LOAN_FACILITY_CODE', 'CMD_CTR_BORROWER_ID', 'LOAN_PRODUCT_NAME',
+       'CMD_CTR_LOAN_ID', 'LOAN_CREATED_DATE', 'PRED_BANK', 'PRED_PEFINDO',
+       'APPLICATION_PD', 'BEHAVIOURAL_PD', 'FINAL_PD', 'A_OR_B_INDICATOR',
+       'MONTHLY_CREDIT', 'MONTHLY_DEBIT', 'MONTHLY_END_BALANCE', 'DC_RATIO',
+       'BAL_CREDIT_RATIO', 'BAL_DEBIT_RATIO', 'MONTHLY_CREDIT_PCT',
+       'MONTHLY_DEBIT_PCT', 'MONTHLY_END_BALANCE_PCT', 'DC_RATIO_PCT',
+       'BAL_CREDIT_RATIO_PCT', 'BAL_DEBIT_RATIO_PCT', 'IDSCORE',
+       'BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'LAINNYA', 'PERCENTAGE_DPD0',
+       'PERCENTAGE_FULL_PAYMENTS_LAST_YEAR',
+       'NUMBER_OF_APPLIED_LOANS_LAST_YEAR', 'CUSTOMER_TENURE',
+       'PREVIOUS_APPLICATION_PD', 'CHANGE_IN_APPLICATION_PD'])
+    if z.loan_date==None:
+        z.loan_date = str(pd.to_datetime("today", utc=True))
+    df_dwh.loc[0, 'LOAN_FACILITY_CODE'] = z.facility_code
+    df_dwh.loc[0, 'CMD_CTR_BORROWER_ID'] = z.borrowerID
+    df_dwh.loc[0, 'LOAN_PRODUCT_NAME'] = z.product_name
+    df_dwh.loc[0, 'CMD_CTR_LOAN_ID'] = 0
+    df_dwh.loc[0, 'LOAN_CREATED_DATE'] = str(z.loan_date)
+    df_dwh.loc[0, 'PRED_BANK'] = x['BS_PD']
+    df_dwh.loc[0, 'PRED_PEFINDO'] = x['Pefindo_PD']
+    df_dwh.loc[0, 'APPLICATION_PD'] = x['ApplicationPD']
+    df_dwh.loc[0, 'BEHAVIOURAL_PD'] = x['BehaviouralPD']
+    df_dwh.loc[0, 'FINAL_PD'] = x['FinalPD']
+    df_dwh.loc[0, 'A_OR_B_INDICATOR'] = x['ABIndicator']
+    df_dwh[['IDSCORE',
+           'BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'LAINNYA']] = z.pefindo_input.head(1)
+    df_dwh[['MONTHLY_CREDIT', 'MONTHLY_DEBIT', 'MONTHLY_END_BALANCE', 'DC_RATIO',
+           'BAL_CREDIT_RATIO', 'BAL_DEBIT_RATIO', 'MONTHLY_CREDIT_PCT',
+           'MONTHLY_DEBIT_PCT', 'MONTHLY_END_BALANCE_PCT', 'DC_RATIO_PCT',
+           'BAL_CREDIT_RATIO_PCT', 'BAL_DEBIT_RATIO_PCT']] = z.all_bs_data[['BANKCREDIT','BANKDEBIT','AVGBANKMONTHENDBALANCES','DCRATIO','BALANCECREDITRATIO',
+           'BALANCEDEBITRATIO', 'BANKCREDITPCT', 'BANKDEBITPCT',
+           'BANKENDBALANCESPCT', 'DCRATIOPCT', 'BALANCECREDITRATIOPCT','BALANCEDEBITRATIOPCT']]
+    if x['percentage_dpd_total'] is None:
+        df_dwh.loc[0, 'PERCENTAGE_DPD0'] = x['percentage_dpd_total']
+    else:
+        df_dwh.loc[0, 'PERCENTAGE_DPD0'] = x['percentage_dpd_total']/100
+    df_dwh.loc[0, 'PERCENTAGE_FULL_PAYMENTS_LAST_YEAR'] = x['percentage_full_payment_last_year']
+    df_dwh.loc[0, 'NUMBER_OF_APPLIED_LOANS_LAST_YEAR'] = x['number_of_applied_loans_last_year']
+    df_dwh.loc[0, 'CUSTOMER_TENURE'] = x['customer_tenure_b']
+    df_dwh.loc[0, 'PREVIOUS_APPLICATION_PD'] = x['previous_application_pd']
+    df_dwh.loc[0, 'CHANGE_IN_APPLICATION_PD'] = x['change_in_pd']
+    df_dwh[['MONTHLY_CREDIT', 'MONTHLY_DEBIT', 'MONTHLY_END_BALANCE', 'DC_RATIO',
+       'BAL_CREDIT_RATIO','BAL_DEBIT_RATIO_PCT', 'IDSCORE',
+       'BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'LAINNYA', 'PERCENTAGE_DPD0',
+       'PERCENTAGE_FULL_PAYMENTS_LAST_YEAR',
+       'NUMBER_OF_APPLIED_LOANS_LAST_YEAR', 'CUSTOMER_TENURE',
+       'PREVIOUS_APPLICATION_PD', 'CHANGE_IN_APPLICATION_PD','BEHAVIOURAL_PD']] = df_dwh[['MONTHLY_CREDIT', 'MONTHLY_DEBIT', 'MONTHLY_END_BALANCE', 'DC_RATIO',
+       'BAL_CREDIT_RATIO','BAL_DEBIT_RATIO_PCT', 'IDSCORE',
+       'BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'LAINNYA', 'PERCENTAGE_DPD0',
+       'PERCENTAGE_FULL_PAYMENTS_LAST_YEAR',
+       'NUMBER_OF_APPLIED_LOANS_LAST_YEAR', 'CUSTOMER_TENURE',
+       'PREVIOUS_APPLICATION_PD', 'CHANGE_IN_APPLICATION_PD','BEHAVIOURAL_PD']].replace([np.nan, '#N/A', 'NA', 'N.A', 'N/A', np.inf, np.NINF, None], 999999)
+    df_dwh = df_dwh.replace([np.nan, '#N/A', 'NA', 'N.A', 'N/A', np.inf, np.NINF,"None"], "")
+    df_dwh = df_dwh.head(1)
+    write_to_snowflake(df_dwh)
+    return result
 
 
 
