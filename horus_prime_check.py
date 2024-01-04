@@ -810,7 +810,7 @@ def calculate(facility_code):
        'FASILITAS_AKTIF_JENIS_FASILITAS_BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'FASILITAS_AKTIF_JENIS_FASILITAS_LAINNYA', 'PERCENTAGE_DPD0',
        'PERCENTAGE_FULL_PAYMENTS_LAST_YEAR',
        'NUMBER_OF_APPLIED_LOANS_LAST_YEAR', 'CUSTOMER_TENURE',
-       'PREVIOUS_APPLICATION_PD', 'CHANGE_IN_APPLICATION_PD'])
+       'PREVIOUS_APPLICATION_PD', 'CHANGE_IN_APPLICATION_PD','SCORING_TIMESTAMP'])
     if z.loan_date==None:
         z.loan_date = str(pd.to_datetime("today", utc=True))
     df_dwh.loc[0, 'LOAN_FACILITY_CODE'] = z.facility_code
@@ -841,6 +841,7 @@ def calculate(facility_code):
     df_dwh.loc[0, 'CUSTOMER_TENURE'] = x['customer_tenure_b']
     df_dwh.loc[0, 'PREVIOUS_APPLICATION_PD'] = x['previous_application_pd']
     df_dwh.loc[0, 'CHANGE_IN_APPLICATION_PD'] = x['change_in_pd']
+    df_dwh.loc[0,'SCORING_TIMESTAMP'] = pd.to_datetime("today", utc=True)
     df_dwh[['MONTHLY_CREDIT', 'MONTHLY_DEBIT', 'MONTHLY_END_BALANCE', 'DC_RATIO',
        'BAL_CREDIT_RATIO','BAL_DEBIT_RATIO_PCT', 'IDSCORE',
        'FASILITAS_AKTIF_JENIS_FASILITAS_BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'FASILITAS_AKTIF_JENIS_FASILITAS_LAINNYA', 'PERCENTAGE_DPD0',
