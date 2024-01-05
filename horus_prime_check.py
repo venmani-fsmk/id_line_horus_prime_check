@@ -591,7 +591,7 @@ class horus:
             application_pd_one_year_before_df = pd.read_sql("""SELECT CMD_CTR_BORROWER_ID, 
             LOAN_CREATED_DATE, APPLICATION_PD
             FROM CBM.DATA_SCIENCE_MODEL_RESULTS.ID_LINE_HORUS_PRIME
-            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s;""", params = {'borrower_id':self.borrowerID}, con=conn)
+            WHERE CMD_CTR_BORROWER_ID = %(borrower_id)s and SCORING_TIMESTAMP IS NOT NULL;""", params = {'borrower_id':self.borrowerID}, con=conn)
         
         percentage_full_payments_df.columns = [str.lower(col) for col in percentage_full_payments_df.columns]
         percentage_dpd_df.columns = [str.lower(col) for col in percentage_dpd_df.columns]
