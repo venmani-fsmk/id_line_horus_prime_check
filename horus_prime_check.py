@@ -697,14 +697,17 @@ class horus:
            'date_difference_from_earliest_loan_woe','%_dpd_woe','final_pred_v1_woe','change_in_pd_woe','%_of_full_payments_last_year_woe',
            'number_of_applied_loans_lastyear_woe']]
 
-        # need to change this part before deployment
-        # change needed
-        #feature_list_behavioural = list(beh_input_data.values[0])
-        #feature_list_behavioural = (np.array(feature_list_behavioural).astype(np.float64))
-        #beh_def_prob = self.predict_behavioural(feature_list_behavioural)
-        with open('id_line_behavioural_model_file.joblib', 'rb') as f:
-            beh_predictor = joblib.load(f)
-            beh_def_prob = beh_predictor.predict_proba(beh_input_data)[0][1]
+        # Todo: Uncomment before the Deployment
+        feature_list_behavioural = list(beh_input_data.values[0])
+        feature_list_behavioural = (np.array(feature_list_behavioural).astype(np.float64))
+        beh_def_prob = self.predict_behavioural(feature_list_behavioural)
+
+        # Local testing
+        # with open('id_line_behavioural_model_file.joblib', 'rb') as f:
+        #     beh_predictor = joblib.load(f)
+        #     beh_def_prob = beh_predictor.predict_proba(beh_input_data)[0][1]
+
+            
         logger.info(f"Behavioural Features: {self.Behavioural_Data}")
         logger.info(f"Probability Behavioural: {beh_def_prob}")
         return b_data, beh_def_prob
