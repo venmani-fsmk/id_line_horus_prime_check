@@ -636,6 +636,7 @@ class horus:
         if application_pd_one_year_before_df.shape[0]==0:
             application_score_pd_one_year_before = None
         else:
+            application_pd_one_year_before_df['loan_created_date'] = application_pd_one_year_before_df['loan_created_date'].str[:10]
             application_pd_one_year_before_df['loan_created_date'] = pd.to_datetime(application_pd_one_year_before_df['loan_created_date'], utc=True)
             one_year_from_today = pd.to_datetime('today', utc=True) - pd.DateOffset(years=1)
             result = application_pd_one_year_before_df.loc[application_pd_one_year_before_df['loan_created_date'].sub(one_year_from_today).abs().idxmin()]
