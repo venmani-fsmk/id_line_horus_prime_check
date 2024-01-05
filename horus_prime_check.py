@@ -450,7 +450,7 @@ class horus:
         # logger.info(f"applied quantum: {data['appliedQuantum'].values[0]}")
         # logger.info(f"applied tenor: {data['appliedTenor'].values[0]}")
 
-        woeMaps = get_gsheet_values('1NcE4mXzJWqcm9V3GfiIH03-qPhxtpM23mmV4Ge2YI6g', 'WOE Table', "A1:E100")
+        woeMaps = get_gsheet_values('1FyTx8Uw2OxBajGmRKGxB-1O21y5nuvzzTIClmJhQx6g', 'WOE Table', "A1:E100")
         # print(woeMaps.head().to_string())
         woeMaps = woeMaps.reset_index(drop=True)
         woeMaps = woeMaps.replace('-444444444444', NINF)
@@ -548,6 +548,7 @@ class horus:
         results['BS_PD'] = default_prob1
         results['Pefindo_PD'] = default_prob2
         results['FinalPD'] = default_prob
+        self.Application_Score = default_prob
         return results
 
 
@@ -769,7 +770,7 @@ def calculate(facility_code):
 
     logger.info(f"Facility_code:{facility_code}")
 
-    sheet_id = '1NcE4mXzJWqcm9V3GfiIH03-qPhxtpM23mmV4Ge2YI6g'
+    sheet_id = '1FyTx8Uw2OxBajGmRKGxB-1O21y5nuvzzTIClmJhQx6g'
 
     othParams = get_gsheet_values(sheet_id, 'Other params', 'A1:C100')
 
