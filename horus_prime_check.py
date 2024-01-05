@@ -171,7 +171,7 @@ class horus:
         return df[df['FACILITY_CODE'] == str(self.facility_code)]#.head(1)
 
     def fetch_model_inputs(self):
-        sheet_id = '1NcE4mXzJWqcm9V3GfiIH03-qPhxtpM23mmV4Ge2YI6g'
+        sheet_id = '1FyTx8Uw2OxBajGmRKGxB-1O21y5nuvzzTIClmJhQx6g'
         sheet_name = 'Model Port (ID line)'
         sheet_range = 'B3:AD2000'
         df = self.google_sheet_to_dataframe(sheet_id, sheet_name, sheet_range)
