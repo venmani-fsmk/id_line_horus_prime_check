@@ -267,6 +267,21 @@ class horus:
         result = json.loads(response['Body'].read().decode())['Output']
         return result
 
+    @staticmethod
+    def predict_behavioural(feature_list_behavioural):
+        content_type = "application/json"
+        request_body = {"Input": [feature_list_behavioural]}
+        data = json.loads(json.dumps(request_body))
+        payload = json.dumps(data)
+        endpoint_name = "id-line-behavioural-model-model-2023-12-23"
+        response = runtime_client.invoke_endpoint(
+            EndpointName=endpoint_name,
+            ContentType=content_type,
+            Body=payload
+        )
+        result = json.loads(response['Body'].read().decode())['Output']
+        return result
+
     def check_values(self):
         print(self.borrowerID)
         print(self.borrowerUEN)
@@ -685,6 +700,7 @@ class horus:
         # change needed
         #feature_list_behavioural = list(beh_input_data.values[0])
         #feature_list_behavioural = (np.array(feature_list_behavioural).astype(np.float64))
+        #beh_def_prob = self.predict_behavioural(feature_list_behavioural)
         with open('id_line_behavioural_model_file.joblib', 'rb') as f:
             beh_predictor = joblib.load(f)
             beh_def_prob = beh_predictor.predict_proba(beh_input_data)[0][1]
