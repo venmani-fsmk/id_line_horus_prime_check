@@ -814,7 +814,7 @@ def calculate(facility_code):
     result['FinalPD'] = final_pd_ab
     logger.info(f"Application Data: {json.loads(output['application_data'])}")
     logger.info(f"Final Results: {result}")
-
+    x = result
     # updating CBM Table
     df_dwh = pd.DataFrame(columns=['LOAN_FACILITY_CODE', 'CMD_CTR_BORROWER_ID', 'LOAN_PRODUCT_NAME',
        'CMD_CTR_LOAN_ID', 'LOAN_CREATED_DATE', 'BANK_PD', 'PEFINDO_PD',
@@ -828,7 +828,7 @@ def calculate(facility_code):
        'NUMBER_OF_APPLIED_LOANS_LAST_YEAR', 'CUSTOMER_TENURE',
        'PREVIOUS_APPLICATION_PD', 'CHANGE_IN_APPLICATION_PD','SCORING_TIMESTAMP'])
     if z.loan_date==None:
-        z.loan_date = str(pd.to_datetime("today", utc=True))
+        z.loan_date = str(pd.to_datetime("today", utc=True).normalize())
     df_dwh.loc[0, 'LOAN_FACILITY_CODE'] = z.facility_code
     df_dwh.loc[0, 'CMD_CTR_BORROWER_ID'] = z.borrowerID
     df_dwh.loc[0, 'LOAN_PRODUCT_NAME'] = z.product_name
@@ -857,7 +857,7 @@ def calculate(facility_code):
     df_dwh.loc[0, 'CUSTOMER_TENURE'] = x['customer_tenure_b']
     df_dwh.loc[0, 'PREVIOUS_APPLICATION_PD'] = x['previous_application_pd']
     df_dwh.loc[0, 'CHANGE_IN_APPLICATION_PD'] = x['change_in_pd']
-    df_dwh.loc[0,'SCORING_TIMESTAMP'] = pd.to_datetime("today", utc=True)
+    df_dwh.loc[0,'SCORING_TIMESTAMP'] = str(pd.to_datetime("today", utc=True).normalize())
     df_dwh[['MONTHLY_CREDIT', 'MONTHLY_DEBIT', 'MONTHLY_END_BALANCE', 'DC_RATIO',
        'BAL_CREDIT_RATIO','BAL_DEBIT_RATIO_PCT', 'IDSCORE',
        'FASILITAS_AKTIF_JENIS_FASILITAS_BG_DITERBITKAN', 'MAKS_USIA_TUNGGAKAN', 'FASILITAS_AKTIF_JENIS_FASILITAS_LAINNYA', 'PERCENTAGE_DPD0',
